@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirCast — Every camera. One live feed.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --dusk:#0B1613;
+    --dusk-2:#0F211C;
+    --turf:#1F4A34;
+    --turf-light:#3D7A54;
+    --turf-bright:#5FA871;
+    --floodlight:#F3F6EC;
+    --amber:#E8A23D;
+    --amber-dim:#B97A2A;
+    --tally:#FF3B30;
+    --signal:#49D9C4;
+    --ink:#E9EFE9;
+    --ink-dim:#9FB0A8;
+    --font-display:'Big Shoulders Display','Arial Narrow',sans-serif;
+    --font-body:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono','SF Mono',Consolas,monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:auto;}
+  body{
+    margin:0;
+    background:var(--dusk);
+    color:var(--ink);
+    font-family:var(--font-body);
+    overflow-x:hidden;
+  }
+  svg g, svg circle, svg .character, svg .live-dot, svg .idle-target{
+    transform-box:fill-box;
+    transform-origin:center;
+  }
+
+  /* ---------- NAV ---------- */
+  .nav{
+    position:fixed; top:0; left:0; right:0; z-index:50;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px clamp(20px,4vw,56px);
+    backdrop-filter:blur(6px);
+    background:linear-gradient(to bottom, rgba(11,22,19,0.55), transparent);
+  }
+  .wordmark{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:22px;
+    letter-spacing:0.06em;
+    color:var(--ink);
+    text-transform:uppercase;
+    display:flex; align-items:baseline; gap:8px;
+  }
+  .wordmark::before{
+    content:'';
+    display:inline-block;
+    width:9px; height:9px; border-radius:50%;
+    background:var(--tally);
+    box-shadow:0 0 10px var(--tally);
+    transform:translateY(-2px);
+  }
+  .nav-tag{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.12em;
+    color:var(--ink-dim);
+    display:none;
+  }
+  @media(min-width:720px){ .nav-tag{ display:inline; } }
+  .nav-cta{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.06em;
+    color:var(--ink);
+    text-decoration:none;
+    border:1px solid rgba(255,59,48,0.55);
+    padding:9px 16px;
+    border-radius:2px;
+    transition:background 0.2s ease, border-color .2s ease;
+  }
+  .nav-cta:hover{ background:rgba(255,59,48,0.12); border-color:var(--tally); }
+
+  /* ---------- HERO STAGE ---------- */
+  #heroStage{
+    position:relative;
+    width:100%;
+    height:100vh;
+    overflow:hidden;
+    background:var(--dusk);
+  }
+  .scene{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+  }
+  .live-dot{ animation:livePulse 1.6s ease-in-out infinite; }
+  @keyframes livePulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .screen-glow{ animation:screenFlicker 6s ease-in-out infinite; }
+  @keyframes screenFlicker{
+    0%,100%{opacity:1;} 45%{opacity:.86;} 47%{opacity:1;} 72%{opacity:.92;} 74%{opacity:1;}
+  }
+
+  .signal-beam{
+    stroke-dasharray:6 11;
+    animation:dashMove 2.6s linear infinite;
+  }
+  @keyframes dashMove{ to{ stroke-dashoffset:-170; } }
+
+  .pulse-glow{ animation:pulseGlow 2.2s ease-in-out infinite; }
+  @keyframes pulseGlow{
+    0%,100%{opacity:.55; transform:scale(1);} 50%{opacity:1; transform:scale(1.35);}
+  }
+
+  #character{ animation:idleBob 4.5s ease-in-out infinite; }
+  @keyframes idleBob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-4px);} }
+
+  .player{ animation:playerDrift 6s ease-in-out infinite; }
+  .player:nth-child(2){ animation-delay:-1.4s; }
+  .player:nth-child(3){ animation-delay:-3s; }
+  @keyframes playerDrift{ 0%,100%{transform:translateX(0);} 50%{transform:translateX(14px);} }
+
+  /* ambient caption */
+  .scene-caption{
+    position:absolute;
+    left:clamp(20px,4vw,56px);
+    bottom:clamp(20px,4vw,48px);
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.14em;
+    color:var(--ink-dim);
+    opacity:0.85;
+    z-index:5;
+    pointer-events:none;
+  }
+
+  /* final hero copy overlay */
+  .hero-copy{
+    position:absolute;
+    left:clamp(20px,6vw,72px);
+    top:50%;
+    transform:translateY(0);
+    max-width:560px;
+    z-index:6;
+    opacity:0;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.18em;
+    color:var(--signal);
+    margin:0 0 14px 0;
+  }
+  .hero-copy h1{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(38px,6vw,72px);
+    line-height:0.98;
+    letter-spacing:0.005em;
+    margin:0 0 18px 0;
+    color:var(--floodlight);
+    text-transform:uppercase;
+  }
+  .hero-copy p{
+    font-size:clamp(15px,1.6vw,18px);
+    line-height:1.55;
+    color:var(--ink-dim);
+    margin:0 0 28px 0;
+    max-width:460px;
+  }
+  .cta-button{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    background:var(--tally);
+    color:var(--floodlight);
+    font-family:var(--font-mono);
+    font-size:13px;
+    letter-spacing:0.08em;
+    text-decoration:none;
+    padding:14px 22px;
+    border-radius:2px;
+    transition:transform .2s ease, box-shadow .2s ease;
+    box-shadow:0 0 0 rgba(255,59,48,0);
+  }
+  .cta-button:hover{ transform:translateY(-2px); box-shadow:0 8px 24px rgba(255,59,48,0.35); }
+  .cta-button::after{ content:'→'; }
+
+  .scroll-cue{
+    position:absolute;
+    right:clamp(20px,4vw,56px);
+    bottom:clamp(20px,4vw,48px);
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.12em;
+    color:var(--ink-dim);
+    z-index:5;
+    display:flex; align-items:center; gap:10px;
+    opacity:0.8;
+  }
+  .scroll-cue .bar{
+    width:1px; height:26px; background:var(--ink-dim); position:relative; overflow:hidden;
+  }
+  .scroll-cue .bar::after{
+    content:''; position:absolute; top:-100%; left:0; width:100%; height:100%;
+    background:var(--signal); animation:scrollBar 1.8s ease-in-out infinite;
+  }
+  @keyframes scrollBar{ 0%{top:-100%;} 100%{top:100%;} }
+
+  /* mobile: trim decorative density */
+  @media(max-width:768px){
+    .ambient-player, .cam-label, .onair-label{ display:none; }
+    .hero-copy{ max-width:88%; }
+  }
+
+  /* reduced motion: static composite, no scroll-jacking */
+  body.is-reduced #heroStage{ height:100vh; }
+  body.is-reduced .scene-caption,
+  body.is-reduced .scroll-cue{ display:none; }
+  body.is-reduced #beat-room,
+  body.is-reduced #beat-threshold,
+  body.is-reduced #beat-turf{ opacity:0 !important; display:none; }
+  body.is-reduced #beat-gallery{ opacity:1 !important; transform:none !important; }
+  body.is-reduced #beam-converge{ opacity:1 !important; }
+  body.is-reduced .hero-copy{ opacity:1 !important; transform:translateY(0) !important; position:absolute; top:50%; transform:translateY(-50%) !important; }
+  body.is-reduced .live-dot, body.is-reduced .signal-beam, body.is-reduced .pulse-glow, body.is-reduced #character, body.is-reduced .player{
+    animation:none;
+  }
+
+  /* ---------- BELOW-FOLD SECTIONS ---------- */
+  .section{
+    padding:104px clamp(20px,6vw,72px);
+    background:var(--dusk);
+    position:relative;
+  }
+  .section-2{ background:var(--dusk-2); }
+  .section-head{
+    max-width:640px;
+    margin:0 0 56px 0;
+  }
+  .section-eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.16em;
+    color:var(--signal);
+    margin:0 0 12px 0;
+  }
+  .section-head h2{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(28px,4vw,44px);
+    line-height:1.02;
+    margin:0;
+    color:var(--floodlight);
+    text-transform:uppercase;
+  }
+
+  .steps{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:1px;
+    background:rgba(233,239,233,0.08);
+    border:1px solid rgba(233,239,233,0.08);
+  }
+  @media(max-width:820px){ .steps{ grid-template-columns:1fr; } }
+  .step{
+    background:var(--dusk);
+    padding:36px 30px 40px;
+    position:relative;
+  }
+  .section-2 .step{ background:var(--dusk-2); }
+  .step-mark{
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--tally);
+    letter-spacing:0.1em;
+    margin-bottom:18px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .step-mark .dot{
+    width:6px; height:6px; border-radius:50%; background:var(--tally);
+    box-shadow:0 0 8px var(--tally);
+  }
+  .step h3{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:26px;
+    text-transform:uppercase;
+    margin:0 0 12px 0;
+    color:var(--floodlight);
+  }
+  .step p{
+    color:var(--ink-dim);
+    font-size:15px;
+    line-height:1.6;
+    margin:0;
+  }
+  .step svg{ margin-bottom:20px; display:block; }
+
+  .cta-band{
+    background:linear-gradient(135deg, var(--dusk) 0%, var(--turf) 140%);
+    padding:96px clamp(20px,6vw,72px);
+    text-align:left;
+    border-top:1px solid rgba(233,239,233,0.08);
+  }
+  .cta-band h2{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(30px,5vw,52px);
+    line-height:1.02;
+    text-transform:uppercase;
+    color:var(--floodlight);
+    margin:0 0 28px 0;
+    max-width:680px;
+  }
+
+  footer{
+    padding:32px clamp(20px,6vw,72px) 48px;
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--ink-dim);
+    background:var(--dusk-2);
+    flex-wrap:wrap; gap:14px;
+  }
+  footer a{ color:var(--ink-dim); }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wordmark">AirCast</div>
+  <span class="nav-tag">PITCH-SIDE BROADCAST</span>
+  <a href="#demo" class="nav-cta">Book a demo</a>
+</nav>
+
+<section id="heroStage">
+  <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="roomWallGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0F1B27"/>
+        <stop offset="55%" stop-color="#0B1613"/>
+        <stop offset="100%" stop-color="#08110F"/>
+      </linearGradient>
+      <radialGradient id="windowGlowGrad" cx="50%" cy="45%" r="65%">
+        <stop offset="0%" stop-color="#3A5A6E"/>
+        <stop offset="55%" stop-color="#1C3340"/>
+        <stop offset="100%" stop-color="#0E1C22"/>
+      </radialGradient>
+      <radialGradient id="screenGlowGrad" cx="50%" cy="45%" r="70%">
+        <stop offset="0%" stop-color="#CFF3EA"/>
+        <stop offset="45%" stop-color="#49D9C4"/>
+        <stop offset="100%" stop-color="#1B4E48"/>
+      </radialGradient>
+      <radialGradient id="rgbGlowGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#6E49D9" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="#6E49D9" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="skyDuskGrad" cx="50%" cy="15%" r="90%">
+        <stop offset="0%" stop-color="#1C3A3D"/>
+        <stop offset="55%" stop-color="#101F1C"/>
+        <stop offset="100%" stop-color="#0A1512"/>
+      </radialGradient>
+      <linearGradient id="turfGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#2A5B40"/>
+        <stop offset="100%" stop-color="#173A29"/>
+      </linearGradient>
+      <radialGradient id="poleGlowGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#F3F6EC" stop-opacity="0.9"/>
+        <stop offset="100%" stop-color="#F3F6EC" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="galleryWallGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0D1A16"/>
+        <stop offset="100%" stop-color="#08110F"/>
+      </linearGradient>
+      <linearGradient id="galleryWindowGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#274E3B"/>
+        <stop offset="60%" stop-color="#183A2C"/>
+        <stop offset="100%" stop-color="#0F241B"/>
+      </linearGradient>
+      <radialGradient id="laptopScreenGlow" cx="50%" cy="30%" r="80%">
+        <stop offset="0%" stop-color="#284A3C"/>
+        <stop offset="100%" stop-color="#101F1A"/>
+      </radialGradient>
+    </defs>
+
+    <!-- ===================== BEAT 1 — THE STREAMER'S ROOM ===================== -->
+    <g id="beat-room">
+      <g id="room-bg">
+        <rect x="0" y="0" width="1600" height="900" fill="url(#roomWallGrad)"/>
+        <line x1="90" y1="0" x2="90" y2="900" stroke="#16261F" stroke-width="2" opacity="0.5"/>
+        <line x1="200" y1="0" x2="200" y2="900" stroke="#16261F" stroke-width="2" opacity="0.35"/>
+        <g id="room-window">
+          <rect x="1160" y="150" width="330" height="460" rx="4" fill="url(#windowGlowGrad)"/>
+          <rect id="room-window-glow" x="1160" y="150" width="330" height="460" rx="4" fill="#E8A23D" opacity="0"/>
+          <rect x="1160" y="150" width="330" height="460" rx="4" fill="none" stroke="#08110F" stroke-width="14"/>
+          <line x1="1325" y1="150" x2="1325" y2="610" stroke="#08110F" stroke-width="10"/>
+          <line x1="1160" y1="378" x2="1490" y2="378" stroke="#08110F" stroke-width="10"/>
+        </g>
+      </g>
+      <g id="room-mid">
+        <rect x="260" y="616" width="700" height="24" rx="4" fill="#101D17"/>
+        <rect x="296" y="640" width="20" height="150" fill="#0B1512"/>
+        <rect x="900" y="640" width="20" height="150" fill="#0B1512"/>
+        <ellipse id="rgb-glow" cx="600" cy="540" rx="270" ry="130" fill="url(#rgbGlowGrad)"/>
+        <g id="room-monitor">
+          <rect x="466" y="462" width="264" height="164" rx="8" fill="#0B1512" stroke="#1E3327" stroke-width="4"/>
+          <rect class="screen-glow" x="482" y="478" width="232" height="132" rx="4" fill="url(#screenGlowGrad)"/>
+          <rect x="582" y="626" width="40" height="24" fill="#0B1512"/>
+          <rect x="546" y="650" width="112" height="10" rx="4" fill="#0B1512"/>
+        </g>
+        <path d="M418 500 Q376 458 420 416 Q452 396 486 418" stroke="#1E3327" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <ellipse cx="488" cy="416" rx="17" ry="23" fill="#152219"/>
+        <ellipse cx="488" cy="416" rx="17" ry="23" fill="none" stroke="#49D9C4" stroke-width="1.5" opacity="0.5"/>
+      </g>
+      <g id="room-fg">
+        <path d="M520 780 Q518 556 640 556 Q762 556 760 780 Z" fill="#0A1310"/>
+        <g id="character">
+          <ellipse cx="640" cy="560" rx="72" ry="82" fill="#0A0F0C"/>
+          <circle cx="640" cy="468" r="47" fill="#0A0F0C"/>
+          <path d="M596 448 Q640 424 684 448 L684 470 Q640 452 596 470 Z" fill="#101C16"/>
+          <circle cx="596" cy="470" r="15" fill="#182A21"/>
+          <circle cx="684" cy="470" r="15" fill="#182A21"/>
+          <path d="M690 424 Q716 468 690 522" stroke="#49D9C4" stroke-width="3" fill="none" opacity="0.55"/>
+          <path d="M592 438 Q574 468 592 508" stroke="#E8A23D" stroke-width="3" fill="none" opacity="0.5"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- ===================== BEAT 2 — THRESHOLD / WINDOW TRANSITION ===================== -->
+    <g id="beat-threshold" opacity="0">
+      <rect id="flareFlash" x="0" y="0" width="1600" height="900" fill="#F3F6EC" opacity="0"/>
+      <g id="window-crossbars">
+        <rect x="1310" y="-80" width="34" height="1060" fill="#08110F"/>
+        <rect x="-80" y="360" width="1760" height="34" fill="#08110F"/>
+      </g>
+      <g id="speed-streaks" opacity="0">
+        <line x1="1325" y1="378" x2="900" y2="378" stroke="#49D9C4" stroke-width="2"/>
+        <line x1="1325" y1="378" x2="1600" y2="150" stroke="#49D9C4" stroke-width="2"/>
+        <line x1="1325" y1="378" x2="1600" y2="620" stroke="#49D9C4" stroke-width="2"/>
+        <line x1="1325" y1="378" x2="1000" y2="120" stroke="#F3F6EC" stroke-width="1.5"/>
+        <line x1="1325" y1="378" x2="1000" y2="680" stroke="#F3F6EC" stroke-width="1.5"/>
+      </g>
+    </g>
+
+    <!-- ===================== BEAT 3 — THE TURF ===================== -->
+    <g id="beat-turf" opacity="0">
+      <g id="turf-bg">
+        <rect width="1600" height="900" fill="url(#skyDuskGrad)"/>
+        <polygon points="0,520 70,498 150,514 230,478 320,512 410,492 500,520 1600,520 1600,900 0,900" fill="#0A1712" opacity="0.85"/>
+      </g>
+      <g id="turf-mid">
+        <polygon points="190,780 1410,780 1210,420 390,420" fill="url(#turfGrad)"/>
+        <polygon points="390,420 1210,420 1252,486 348,486" fill="#3D7A54" opacity="0.45"/>
+        <polygon points="348,486 1252,486 1300,558 300,558" fill="#2A5B40" opacity="0.35"/>
+        <polygon points="300,558 1300,558 1352,640 248,640" fill="#3D7A54" opacity="0.3"/>
+        <polygon points="248,640 1352,640 1400,710 200,710" fill="#2A5B40" opacity="0.28"/>
+        <path d="M430 420 L430 336 L494 336" stroke="#F3F6EC" stroke-width="6" fill="none" opacity="0.85"/>
+        <path d="M1170 420 L1170 336 L1106 336" stroke="#F3F6EC" stroke-width="6" fill="none" opacity="0.85"/>
+        <g id="pole1" transform="translate(150,470)">
+          <rect x="-4" y="0" width="8" height="230" fill="#101C16"/>
+          <circle cx="0" cy="0" r="30" fill="url(#poleGlowGrad)"/>
+        </g>
+        <g id="pole2" transform="translate(1450,470)">
+          <rect x="-4" y="0" width="8" height="230" fill="#101C16"/>
+          <circle cx="0" cy="0" r="30" fill="url(#poleGlowGrad)"/>
+        </g>
+        <g class="ambient-player player">
+          <ellipse cx="700" cy="600" rx="10" ry="5" fill="#0A1712" opacity="0.7"/>
+          <circle cx="700" cy="588" r="6" fill="#0A1712" opacity="0.7"/>
+        </g>
+        <g class="ambient-player player">
+          <ellipse cx="900" cy="640" rx="10" ry="5" fill="#0A1712" opacity="0.6"/>
+          <circle cx="900" cy="628" r="6" fill="#0A1712" opacity="0.6"/>
+        </g>
+        <g class="ambient-player player">
+          <ellipse cx="800" cy="560" rx="9" ry="4" fill="#0A1712" opacity="0.55"/>
+          <circle cx="800" cy="550" r="5" fill="#0A1712" opacity="0.55"/>
+        </g>
+      </g>
+      <g id="turf-fg">
+        <g class="cam-rig" transform="translate(210,742)">
+          <rect x="-5" y="-84" width="10" height="84" fill="#101C16"/>
+          <rect x="-22" y="-104" width="44" height="26" rx="4" fill="#0B1512" stroke="#3D7A54" stroke-width="2"/>
+          <circle class="live-dot" cx="17" cy="-112" r="5" fill="#FF3B30"/>
+          <text class="cam-label" x="-22" y="-52" font-family="IBM Plex Mono, monospace" font-size="14" fill="#9FB0A8">CAM 01</text>
+        </g>
+        <g class="cam-rig" transform="translate(700,782)">
+          <rect x="-5" y="-70" width="10" height="70" fill="#101C16"/>
+          <rect x="-22" y="-90" width="44" height="26" rx="4" fill="#0B1512" stroke="#3D7A54" stroke-width="2"/>
+          <circle class="live-dot" cx="17" cy="-98" r="5" fill="#FF3B30"/>
+          <text class="cam-label" x="-22" y="-38" font-family="IBM Plex Mono, monospace" font-size="14" fill="#9FB0A8">CAM 02</text>
+        </g>
+        <g class="cam-rig" transform="translate(1390,742)">
+          <rect x="-5" y="-84" width="10" height="84" fill="#101C16"/>
+          <rect x="-22" y="-104" width="44" height="26" rx="4" fill="#0B1512" stroke="#3D7A54" stroke-width="2"/>
+          <circle class="live-dot" cx="17" cy="-112" r="5" fill="#FF3B30"/>
+          <text class="cam-label" x="-22" y="-52" font-family="IBM Plex Mono, monospace" font-size="14" fill="#9FB0A8">CAM 03</text>
+        </g>
+        <g class="cam-rig" transform="translate(430,436)">
+          <rect x="-4" y="-58" width="8" height="58" fill="#101C16"/>
+          <rect x="-18" y="-76" width="36" height="22" rx="3" fill="#0B1512" stroke="#3D7A54" stroke-width="2"/>
+          <circle class="live-dot" cx="13" cy="-82" r="4" fill="#FF3B30"/>
+          <text class="cam-label" x="-18" y="-30" font-family="IBM Plex Mono, monospace" font-size="12" fill="#9FB0A8">CAM 04</text>
+        </g>
+        <g class="cam-rig" transform="translate(1170,436)">
+          <rect x="-4" y="-58" width="8" height="58" fill="#101C16"/>
+          <rect x="-18" y="-76" width="36" height="22" rx="3" fill="#0B1512" stroke="#3D7A54" stroke-width="2"/>
+          <circle class="live-dot" cx="13" cy="-82" r="4" fill="#FF3B30"/>
+          <text class="cam-label" x="-18" y="-30" font-family="IBM Plex Mono, monospace" font-size="12" fill="#9FB0A8">CAM 05</text>
+        </g>
+
+        <path class="signal-beam" d="M227,-112 C 600,-320 1050,-260 1500,140" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.5" transform="translate(0,0)"/>
+        <path class="signal-beam" d="M717,-98 C 950,-260 1200,-240 1500,140" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.45"/>
+        <path class="signal-beam" d="M1407,-112 C 1460,-200 1490,-160 1500,140" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.5"/>
+        <path class="signal-beam" d="M443,-82 C 800,-220 1200,-220 1500,140" stroke="#49D9C4" stroke-width="1.5" fill="none" opacity="0.4"/>
+        <path class="signal-beam" d="M1183,-82 C 1300,-180 1450,-140 1500,140" stroke="#49D9C4" stroke-width="1.5" fill="none" opacity="0.4"/>
+      </g>
+    </g>
+
+    <!-- ===================== BEAT 4 — THE CONTROL GALLERY ===================== -->
+    <g id="beat-gallery" opacity="0">
+      <g id="gallery-bg">
+        <rect width="1600" height="900" fill="url(#galleryWallGrad)"/>
+        <rect x="140" y="110" width="1320" height="370" rx="6" fill="url(#galleryWindowGrad)"/>
+        <rect x="140" y="110" width="1320" height="370" rx="6" fill="none" stroke="#08110F" stroke-width="16"/>
+        <line x1="800" y1="110" x2="800" y2="480" stroke="#08110F" stroke-width="8" opacity="0.6"/>
+      </g>
+      <g id="gallery-mid">
+        <rect x="380" y="636" width="840" height="24" rx="4" fill="#101D17"/>
+        <g id="switcher-laptop" transform="translate(800,596)">
+          <path d="M-140 0 L140 0 L120 -96 L-120 -96 Z" fill="#0B1512" stroke="#1E3327" stroke-width="3"/>
+          <rect x="-118" y="-256" width="236" height="160" rx="6" fill="#0B1512" stroke="#1E3327" stroke-width="4"/>
+          <rect x="-104" y="-244" width="208" height="136" rx="3" fill="url(#laptopScreenGlow)"/>
+          <g id="switcher-grid" transform="translate(-96,-236)">
+            <rect x="0" y="0" width="90" height="56" rx="3" fill="#16261F"/>
+            <rect x="102" y="0" width="90" height="56" rx="3" fill="#16261F" stroke="#FF3B30" stroke-width="3"/>
+            <text class="onair-label" x="106" y="14" font-family="IBM Plex Mono, monospace" font-size="10" fill="#FF3B30" letter-spacing="1">ON AIR</text>
+            <rect x="0" y="64" width="90" height="56" rx="3" fill="#16261F"/>
+            <rect x="102" y="64" width="90" height="56" rx="3" fill="#16261F"/>
+          </g>
+        </g>
+      </g>
+      <g id="gallery-fg">
+        <g id="operator">
+          <ellipse cx="700" cy="700" rx="68" ry="78" fill="#0A0F0C"/>
+          <circle cx="700" cy="608" r="43" fill="#0A0F0C"/>
+          <path d="M660 590 Q700 570 740 590" stroke="#101D17" stroke-width="9" fill="none"/>
+          <path d="M706 610 Q744 606 748 636" stroke="#49D9C4" stroke-width="2.5" fill="none" opacity="0.5"/>
+        </g>
+      </g>
+      <g id="beam-converge" opacity="0">
+        <path class="signal-beam" d="M260,140 C 480,300 640,420 796,344" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.55"/>
+        <path class="signal-beam" d="M1340,140 C 1100,300 940,420 804,344" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.55"/>
+        <path class="signal-beam" d="M800,120 C 800,220 800,300 800,344" stroke="#49D9C4" stroke-width="1.5" fill="none" opacity="0.4"/>
+        <circle class="pulse-glow" cx="800" cy="340" r="9" fill="#49D9C4"/>
+      </g>
+    </g>
+  </svg>
+
+  <p class="scene-caption" id="sceneCaption"></p>
+
+  <div class="hero-copy">
+    <p class="eyebrow">PITCH-SIDE BROADCAST</p>
+    <h1>Every camera.<br>One live feed.</h1>
+    <p>Mount phones pitch-side, let one operator call the shots, and put every match on air — no broadcast truck required.</p>
+    <a href="#demo" class="cta-button">Book a demo</a>
+  </div>
+
+  <div class="scroll-cue" id="scrollCue"><span>SCROLL</span><span class="bar"></span></div>
+</section>
+
+<section class="section" id="how">
+  <div class="section-head">
+    <p class="section-eyebrow">THE PIPELINE</p>
+    <h2>Six phones. One switcher.<br>Zero trucks.</h2>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+        <rect x="16" y="6" width="12" height="30" rx="2.5" stroke="#49D9C4" stroke-width="2"/>
+        <circle cx="34" cy="10" r="3" fill="#FF3B30"/>
+      </svg>
+      <div class="step-mark"><span class="dot"></span>RIG</div>
+      <h3>Mount the cameras</h3>
+      <p>Clip a phone to every corner and sideline stand. No cabling, no crew — the rig goes up before warm-ups end.</p>
+    </div>
+    <div class="step">
+      <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+        <rect x="4" y="8" width="16" height="10" rx="2" stroke="#49D9C4" stroke-width="2"/>
+        <rect x="24" y="8" width="16" height="10" rx="2" stroke="#FF3B30" stroke-width="2"/>
+        <rect x="4" y="24" width="16" height="10" rx="2" stroke="#49D9C4" stroke-width="2"/>
+        <rect x="24" y="24" width="16" height="10" rx="2" stroke="#49D9C4" stroke-width="2"/>
+      </svg>
+      <div class="step-mark"><span class="dot"></span>SWITCH</div>
+      <h3>One operator calls it</h3>
+      <p>Every feed lands in a simple switcher grid. Your operator taps the angle that matters, live, the way a broadcast truck would.</p>
+    </div>
+    <div class="step">
+      <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+        <circle cx="22" cy="22" r="4" fill="#FF3B30"/>
+        <path d="M14 22a8 8 0 0 1 16 0" stroke="#49D9C4" stroke-width="2" fill="none"/>
+        <path d="M8 22a14 14 0 0 1 28 0" stroke="#49D9C4" stroke-width="2" fill="none" opacity="0.5"/>
+      </svg>
+      <div class="step-mark"><span class="dot"></span>STREAM</div>
+      <h3>It goes out live</h3>
+      <p>The chosen angle streams straight out to parents, scouts, and fans watching from anywhere — while the game is still going.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band" id="demo">
+  <h2>Your pitch already has the crowd.<br>Give it the broadcast.</h2>
+  <a href="#" class="cta-button">Book a demo</a>
+</section>
+
+<footer>
+  <span>© 2026 AirCast</span>
+  <span><a href="#">Privacy</a> · <a href="#">Terms</a> · <a href="#">Contact</a></span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script>
+(function(){
+  var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var captionEl = document.getElementById('sceneCaption');
+  function setCaption(txt){ if(captionEl) captionEl.textContent = txt; }
+
+  if (prefersReduced || typeof gsap === 'undefined') {
+    document.body.classList.add('is-reduced');
+    if (typeof gsap !== 'undefined') {
+      gsap.to('.hero-copy', {opacity:1, duration:0.8, delay:0.2});
+    } else {
+      document.querySelector('.hero-copy').style.opacity = 1;
+    }
+    return;
+  }
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  // Gentle on-load intro for Beat 1, independent of scroll (handles landing before any scrolling)
+  gsap.from('#beat-room', {opacity:0, duration:1.3, ease:'power2.out'});
+  gsap.from('.nav', {opacity:0, y:-14, duration:1, delay:0.2, ease:'power2.out'});
+
+  var tl = gsap.timeline({
+    defaults:{ ease:'power2.inOut' },
+    scrollTrigger:{
+      trigger:'#heroStage',
+      start:'top top',
+      end: function(){ return window.innerWidth < 768 ? '+=220%' : '+=420%'; },
+      scrub:1,
+      pin:true,
+      anticipatePin:1,
+      invalidateOnRefresh:true
+    }
+  });
+
+  // ---------- BEAT 1: ROOM (0–25) ----------
+  tl.addLabel('room', 0);
+  tl.call(function(){ setCaption('MATCHDAY — 6:42 PM'); }, null, 'room');
+  tl.to('#room-bg',  {scale:1.06, x:-14, transformOrigin:'75% 45%', duration:25}, 'room');
+  tl.to('#room-mid', {scale:1.14, x:-26, transformOrigin:'60% 60%', duration:25}, 'room');
+  tl.to('#room-fg',  {scale:1.26, x:-34, opacity:0.85, transformOrigin:'55% 65%', duration:25}, 'room');
+  tl.to('#room-window-glow', {opacity:0.35, duration:25}, 'room');
+
+  // ---------- BEAT 2: THRESHOLD (25–40, fast snap) ----------
+  tl.addLabel('threshold', 25);
+  tl.call(function(){ setCaption(''); }, null, 'threshold');
+  tl.to('#beat-room', {opacity:0, duration:6, ease:'power1.in'}, 'threshold');
+  tl.to('#window-crossbars', {scale:3.4, x:60, transformOrigin:'83% 42%', duration:9, ease:'power2.in'}, 'threshold');
+  tl.to('#speed-streaks', {opacity:0.85, duration:4, ease:'power1.in'}, 'threshold');
+  tl.to('#speed-streaks', {opacity:0, duration:5}, 'threshold+=6');
+  tl.set('#beat-threshold', {opacity:1}, 'threshold');
+  tl.to('#flareFlash', {opacity:0.92, duration:4, ease:'power1.in'}, 'threshold+=3');
+  tl.to('#flareFlash', {opacity:0, duration:6}, 'threshold+=7');
+  tl.to('#beat-turf', {opacity:1, duration:9}, 'threshold+=6');
+  tl.to('#beat-threshold', {opacity:0, duration:1}, 'threshold+=14');
+
+  // ---------- BEAT 3: TURF (40–75, slow orbital drift) ----------
+  tl.addLabel('turf', 40);
+  tl.call(function(){ setCaption('SIX ANGLES. ONE PITCH.'); }, null, 'turf+=3');
+  tl.fromTo('#turf-mid', {scale:1.12, y:20}, {scale:1, y:0, duration:35, ease:'power1.out'}, 'turf');
+  tl.fromTo('#turf-fg',  {scale:1.08}, {scale:1, duration:35, ease:'power1.out'}, 'turf');
+  tl.to('#turf-bg', {x:-30, duration:17, ease:'power1.inOut'}, 'turf');
+  tl.to('#turf-bg', {x:24, duration:18, ease:'power1.inOut'}, 'turf+=17');
+
+  // ---------- BEAT 4: GALLERY (75–100) ----------
+  tl.addLabel('gallery', 75);
+  tl.call(function(){ setCaption(''); }, null, 'gallery');
+  tl.to('#beat-turf', {opacity:0, scale:0.94, duration:10, ease:'power2.inOut'}, 'gallery');
+  tl.fromTo('#beat-gallery', {opacity:0, scale:1.05}, {opacity:1, scale:1, duration:15, ease:'power2.out'}, 'gallery+=3');
+  tl.to('#beam-converge', {opacity:1, duration:9, ease:'power1.in'}, 'gallery+=7');
+  tl.fromTo('.hero-copy', {opacity:0, y:30}, {opacity:1, y:0, duration:10, ease:'power2.out'}, 'gallery+=15');
+  tl.to('#scrollCue', {opacity:0, duration:5}, 'room+=2');
+
+  tl.addLabel('end', 100);
+})();
+</script>
+</body>
+</html>
